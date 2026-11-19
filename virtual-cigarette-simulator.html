@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#090a0d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>EMBER — Virtual Cigarette</title>
+<style>
+:root{color-scheme:dark;--bg:#090a0d;--panel:rgba(23,25,31,.78);--line:rgba(255,255,255,.1);--muted:#9da1aa;--accent:#ff9a52}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",Inter, sans-serif;color:#f5f5f7;overscroll-behavior:none}
+body{min-height:100svh}
+#app{position:fixed;inset:0;overflow:hidden;background:radial-gradient(ellipse at 50% 44%,#202128 0%,#101116 42%,#08090c 100%);padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+#stage{position:absolute;inset:0;touch-action:none}
+canvas{display:block;width:100%;height:100%;outline:none}
+.vignette{pointer-events:none;position:absolute;inset:0;background:radial-gradient(ellipse at center,transparent 35%,rgba(0,0,0,.34) 100%)}
+header{position:absolute;top:calc(env(safe-area-inset-top) + 18px);left:22px;right:22px;display:flex;justify-content:space-between;align-items:center;pointer-events:none}
+.brand{font-size:12px;letter-spacing:.34em;font-weight:700;color:#f3eee9}
+.brand span{color:var(--accent)}
+.status{font-size:10px;letter-spacing:.16em;color:#b8bbc2;text-transform:uppercase;display:flex;align-items:center;gap:8px}
+.dot{width:6px;height:6px;border-radius:50%;background:#ff9a52;box-shadow:0 0 12px #ff7a36}
+.hint{position:absolute;top:calc(env(safe-area-inset-top) + 74px);width:100%;text-align:center;color:rgba(255,255,255,.48);font-size:11px;letter-spacing:.06em;pointer-events:none}
+.bottom{position:absolute;left:18px;right:18px;bottom:calc(env(safe-area-inset-bottom) + 18px);display:flex;flex-direction:column;gap:14px}
+.readout{display:flex;justify-content:space-between;align-items:center;padding:0 5px;color:#aeb0b8;font-size:10px;letter-spacing:.13em;text-transform:uppercase}
+.readout strong{display:block;color:#f0ece8;font-size:13px;letter-spacing:.04em;font-weight:600;margin-top:5px}
+.controls{display:grid;grid-template-columns:1fr 1.25fr 1fr;gap:10px}
+button{appearance:none;border:1px solid var(--line);background:rgba(255,255,255,.07);color:#f7f4f0;border-radius:17px;min-height:54px;font:600 12px -apple-system,BlinkMacSystemFont,sans-serif;letter-spacing:.08em;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);touch-action:manipulation}
+button:active{transform:scale(.97);background:rgba(255,255,255,.13)}
+button.primary{background:linear-gradient(135deg,#ffb16d,#e66d37);border-color:rgba(255,190,140,.5);color:#1b100b;box-shadow:0 8px 28px rgba(230,109,55,.2)}
+button small{display:block;font-size:9px;opacity:.65;letter-spacing:.1em;margin-top:4px}
+.progress{height:3px;background:rgba(255,255,255,.1);border-radius:9px;overflow:hidden;margin:0 5px}
+#burnBar{height:100%;width:100%;background:linear-gradient(90deg,#ffbd7a,#e96b37);transform-origin:left;transition:width .4s linear}
+.note{text-align:center;font-size:9px;color:rgba(255,255,255,.28);letter-spacing:.06em;line-height:1.5}
+#toast{position:absolute;left:50%;top:calc(env(safe-area-inset-top) + 110px);transform:translate(-50%,-8px);opacity:0;background:rgba(15,16,20,.82);border:1px solid var(--line);padding:10px 14px;border-radius:30px;font-size:11px;color:#ddd;white-space:nowrap;transition:.25s;pointer-events:none}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+@media(min-width:700px){.bottom{max-width:520px;left:50%;right:auto;width:calc(100% - 36px);transform:translateX(-50%)}header{left:32px;right:32px}.hint{top:100px}}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage" aria-label="Interactive 3D virtual cigarette. Drag to rotate; hold Puff to animate smoke."></div>
+  <div class="vignette"></div>
+  <header><div class="brand">EM<span>B</span>ER / 01</div><div class="status"><i class="dot"></i> SIMULATION ACTIVE</div></header>
+  <div class="hint">DRAG TO ROTATE · PINCH TO ZOOM</div>
+  <div id="toast">Simulation reset</div>
+  <section class="bottom">
+    <div class="readout">
+      <div>VIRTUAL SESSION<strong id="session">00:00</strong></div>
+      <div style="text-align:right">CIGARETTE<strong id="remaining">100% · UNLIT</strong></div>
+    </div>
+    <div class="progress"><div id="burnBar"></div></div>
+    <div class="controls">
+      <button id="reset">RESET<small>NEW SESSION</small></button>
+      <button class="primary" id="puff">HOLD TO PUFF<small>RELEASE TO STOP</small></button>
+      <button id="light">LIGHT<small>IGNITE / EXTINGUISH</small></button>
+    </div>
+    <div class="note">A visual-only 3D simulation. No real smoke, tobacco, or nicotine.</div>
+  </section>
+</div>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+const stage=document.querySelector('#stage');
+const scene=new THREE.Scene();
+scene.fog=new THREE.FogExp2(0x0b0c10,.055);
+const camera=new THREE.PerspectiveCamera(34,1,.1,100);
+camera.position.set(0,1.55,8.2);
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true,powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.8));
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1.22;
+stage.appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xbfc9e0,0x21160f,2.0));
+
+const key=new THREE.DirectionalLight(0xffe0c3,3.1);key.position.set(-3,4,5);scene.add(key);
+const rim=new THREE.PointLight(0xff7438,24,9);rim.position.set(2,.4,-2);scene.add(rim);
+const fill=new THREE.PointLight(0x8da4d8,8,10);fill.position.set(-3,-1,3);scene.add(fill);
+
+const cigarette=new THREE.Group();scene.add(cigarette);
+const paperMat=new THREE.MeshStandardMaterial({color:0xe7dfd0,roughness:.78});
+const filterMat=new THREE.MeshStandardMaterial({color:0xc98a56,roughness:.68});
+const bandMat=new THREE.MeshStandardMaterial({color:0xb96d43,roughness:.65});
+const tobaccoMat=new THREE.MeshStandardMaterial({color:0x30251e,roughness:1});
+const emberMat=new THREE.MeshStandardMaterial({color:0xff6b25,emissive:0xff3d08,emissiveIntensity:2.4,roughness:.4});
+const ashMat=new THREE.MeshStandardMaterial({color:0x8c8983,roughness:1});
+function cylinder(radiusTop,radiusBottom,length,material,segments=48){
+ const mesh=new THREE.Mesh(new THREE.CylinderGeometry(radiusTop,radiusBottom,length,segments),material);
+ mesh.rotation.z=Math.PI/2;return mesh;
+}
+// Cigarette runs along X: filter on left, lit end on right.
+const body=cylinder(.115,.115,3.45,paperMat);body.position.x=-.02;cigarette.add(body);
+const filter=cylinder(.116,.116,.78,filterMat);filter.position.x=-2.13;cigarette.add(filter);
+const filterBand=cylinder(.117,.117,.055,bandMat);filterBand.position.x=-1.735;cigarette.add(filterBand);
+const tobacco=cylinder(.104,.104,.07,tobaccoMat);tobacco.position.x=1.72;cigarette.add(tobacco);
+const ember=cylinder(.105,.105,.035,emberMat);ember.position.x=1.77;cigarette.add(ember);
+const ash=cylinder(.105,.105,.045,ashMat);ash.position.x=1.79;ash.visible=false;cigarette.add(ash);
+// Fine paper seam and subtle filter rings.
+for(let i=0;i<3;i++){const ring=new THREE.Mesh(new THREE.TorusGeometry(.116,.002,6,64),new THREE.MeshStandardMaterial({color:0xb7ad9d,roughness:1}));ring.rotation.y=Math.PI/2;ring.position.x=-2.46+i*.018;cigarette.add(ring);}
+cigarette.rotation.z=-.10;cigarette.rotation.y=-.18;
+
+const floor=new THREE.Mesh(new THREE.CircleGeometry(5,64),new THREE.MeshBasicMaterial({color:0x0b0c10,transparent:true,opacity:.22}));
+floor.rotation.x=-Math.PI/2;floor.position.y=-1.8;scene.add(floor);
+
+// Procedural soft smoke texture, used by camera-facing sprites.
+const smokeCanvas=document.createElement('canvas');smokeCanvas.width=128;smokeCanvas.height=128;
+const ctx=smokeCanvas.getContext('2d');const grad=ctx.createRadialGradient(64,64,2,64,64,62);
+grad.addColorStop(0,'rgba(220,224,232,.28)');grad.addColorStop(.28,'rgba(190,198,210,.16)');grad.addColorStop(.65,'rgba(160,170,185,.055)');grad.addColorStop(1,'rgba(140,150,165,0)');
+ctx.fillStyle=grad;ctx.fillRect(0,0,128,128);
+const smokeTexture=new THREE.CanvasTexture(smokeCanvas);
+const smoke=[];
+function makeSmoke(boost=1){
+ const mat=new THREE.SpriteMaterial({map:smokeTexture,transparent:true,opacity:.35,depthWrite:false,blending:THREE.NormalBlending});
+ const sprite=new THREE.Sprite(mat);sprite.position.set(1.78,.02,.03);
+ const s=.18+Math.random()*.15;sprite.scale.set(s,s*1.5,1);
+ scene.add(sprite);
+ smoke.push({sprite,life:0,max:2.8+Math.random()*1.8,vx:(Math.random()-.5)*.18,vy:.55+Math.random()*.5,vz:(Math.random()-.5)*.15,twist:(Math.random()-.5)*.5,boost});
+}
+let lit=false,puffing=false,burn=1,elapsed=0,last=performance.now(),smokeClock=0;
+const $=s=>document.querySelector(s);
+function updateUI(){
+ $('#remaining').textContent=Math.max(0,Math.round(burn*100))+'% · '+(lit?'BURNING':'UNLIT');
+ $('#burnBar').style.width=(burn*100)+'%';
+ $('#session').textContent=String(Math.floor(elapsed/60)).padStart(2,'0')+':'+String(Math.floor(elapsed%60)).padStart(2,'0');
+}
+function setLit(value){lit=value;ember.visible=lit;ash.visible=!lit&&burn<.99;$('#light').innerHTML=lit?'EXTINGUISH<small>STOP THE GLOW</small>':'LIGHT<small>IGNITE / EXTINGUISH</small>';updateUI();if(lit)showToast('Virtual ember ignited');}
+function showToast(message){const t=$('#toast');t.textContent=message;t.classList.add('show');clearTimeout(showToast.timer);showToast.timer=setTimeout(()=>t.classList.remove('show'),1400);}
+$('#light').addEventListener('click',()=>setLit(!lit));
+$('#reset').addEventListener('click',()=>{lit=false;puffing=false;burn=1;elapsed=0;smoke.forEach(p=>{scene.remove(p.sprite);p.sprite.material.dispose();});smoke.length=0;ember.visible=false;ash.visible=false;$('#puff').classList.remove('active');updateUI();setLit(false);showToast('Session reset');});
+const puffButton=$('#puff');
+function startPuff(){if(!lit){showToast('Light the virtual cigarette first');return;}puffing=true;puffButton.style.filter='brightness(1.12)';}
+function stopPuff(){puffing=false;puffButton.style.filter='';}
+puffButton.addEventListener('pointerdown',e=>{e.preventDefault();startPuff();});
+['pointerup','pointercancel','pointerleave'].forEach(ev=>puffButton.addEventListener(ev,stopPuff));
+
+let targetRotY=-.18,targetRotZ=-.10,dragging=false,lastX=0,lastY=0,pinchStart=0,startCameraZ=8.2;
+renderer.domElement.addEventListener('pointerdown',e=>{dragging=true;lastX=e.clientX;lastY=e.clientY;renderer.domElement.setPointerCapture(e.pointerId);});
+renderer.domElement.addEventListener('pointermove',e=>{if(!dragging)return;const dx=e.clientX-lastX,dy=e.clientY-lastY;targetRotY+=dx*.008;targetRotZ=Math.max(-.65,Math.min(.45,targetRotZ+dy*.003));lastX=e.clientX;lastY=e.clientY;});
+renderer.domElement.addEventListener('pointerup',()=>dragging=false);
+renderer.domElement.addEventListener('pointercancel',()=>dragging=false);
+let pointers=new Map();
+renderer.domElement.addEventListener('pointerdown',e=>{pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});if(pointers.size===2){const a=[...pointers.values()];pinchStart=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);startCameraZ=camera.position.z;}});
+renderer.domElement.addEventListener('pointermove',e=>{if(!pointers.has(e.pointerId))return;pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});if(pointers.size===2){const a=[...pointers.values()],d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);if(pinchStart>0)camera.position.z=THREE.MathUtils.clamp(startCameraZ*pinchStart/Math.max(1,d),5.4,11);}});
+['pointerup','pointercancel'].forEach(ev=>renderer.domElement.addEventListener(ev,e=>{pointers.delete(e.pointerId);if(pointers.size<2)pinchStart=0;}));
+
+function resize(){const w=stage.clientWidth,h=stage.clientHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.fov=w<500?38:34;camera.position.y=w<500?1.55:1.25;camera.updateProjectionMatrix();}
+new ResizeObserver(resize).observe(stage);resize();
+
+function animate(now){
+ requestAnimationFrame(animate);const dt=Math.min((now-last)/1000,.05);last=now;
+ cigarette.rotation.y+=(targetRotY-cigarette.rotation.y)*.07;cigarette.rotation.z+=(targetRotZ-cigarette.rotation.z)*.07;
+ cigarette.position.y=Math.sin(now*.0007)*.035;
+ if(lit){ember.material.emissiveIntensity=2.0+Math.sin(now*.018)*.55;if(puffing){burn=Math.max(0,burn-dt*.006);smokeClock+=dt;if(smokeClock>.075){makeSmoke(1.5);smokeClock=0;}}else{smokeClock+=dt;if(smokeClock>.36){makeSmoke(.7);smokeClock=0;}}if(burn<=0){lit=false;setLit(false);showToast('Virtual cigarette finished');}}
+ if(puffing&&lit)elapsed+=dt;else if(lit)elapsed+=dt*.15;
+ for(let i=smoke.length-1;i>=0;i--){const p=smoke[i];p.life+=dt;const t=p.life/p.max;p.sprite.position.x+=p.vx*dt+Math.sin(now*.001+p.life*2)*.0008;p.sprite.position.y+=p.vy*dt;p.sprite.position.z+=p.vz*dt;p.sprite.material.opacity=Math.max(0,.32*(1-t)*p.boost);const scale=.18+t*.85;p.sprite.scale.set(scale,scale*1.65,1);if(t>=1){scene.remove(p.sprite);p.sprite.material.dispose();smoke.splice(i,1);}}
+ updateUI();renderer.render(scene,camera);
+}
+requestAnimationFrame(animate);
+document.addEventListener('visibilitychange',()=>{if(document.hidden)stopPuff();});
+</script>
+</body>
+</html>
+</body>
+</html>
